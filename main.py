@@ -888,7 +888,7 @@ def generate_ppc_report(
 
     profit_df["ASIN"] = profit_df[
         "ASIN"
-    ].rstrip()  # right striping the series for extra spaces
+    ].str.rstrip()  # right striping the series for extra spaces
 
     summarizeProductsAndCampaingsWithReport = (
         summarizeProductsAndCampaingsWithReport.merge(
