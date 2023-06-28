@@ -13,6 +13,7 @@ import io
 import streamlit as st
 from PIL import Image
 from io import BytesIO
+import zipfile
 
 
 def new_access_token(credentials):
@@ -1023,6 +1024,10 @@ if run:  # if the button is pressed
         credentials, profile_id_df, ProductByCampaign_df, profit_df, startDate, endDate
     )  # generate the ppc and profit report
 
+    final_report = final_report.drop(
+        ["ASIN", "Country"], axis=1
+    )  # dropping unnessecary columns
+
     xlsx_data = BytesIO()  # create an empty bytes object
     with pd.ExcelWriter(
         xlsx_data, engine="openpyxl"
@@ -1031,10 +1036,6 @@ if run:  # if the button is pressed
             writer, sheet_name="PPC Report"
         )  # write the final report into byte object
     xlsx_data.seek(0)  # run the byte to the beggining
-
-    final_report_donwload = st.download_button(
-        label="📥 Download Final PPC Report", data=xlsx_data, file_name="PPC Report.xlsx"
-    )  # create a downlaod button for the final report byte object
 
     profit_xlsx_data = BytesIO()  # create an empty bytes object
     with pd.ExcelWriter(
@@ -1045,12 +1046,36 @@ if run:  # if the button is pressed
         )  # write the profit final report into byte object
     profit_xlsx_data.seek(0)  # run the byte to the beggining
 
-    profit_report_download = st.download_button(
-        label="📥 Download Final Profit Report",
-        data=profit_xlsx_data,
-        file_name="Profit Report.xlsx",
-    )  # create a downlaod button for the final profit report byte object
+    zip_buffer = io.BytesIO()  # create empty byte for zip
+    with zipfile.ZipFile(
+        zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED
+    ) as zf:  # write files to the zip buffer
+        # Add each file to the zip file
+        zf.writestr(
+            "PPC Report.xlsx", xlsx_data.read()
+        )  # read the content of the xlsx_data
+        zf.writestr(
+            "Profit Report.xlsx", profit_xlsx_data.read()
+        )  # read the content of the profit_xlsx_data
 
+    zip_buffer.seek(0)  # Reset the file pointer to the beginning
+
+    download = st.download_button(
+        label="📥 Download Reports", data=zip_buffer, file_name="Reports.zip"
+    )  # a download button for the zip file
     st.success(
-        "הדוח הושלם בהצלחה"
+        "הניטור הושלם בהצלחה"
     )  # write a report as been succsefully generated message
+
+    # profit_report_download = st.download_button(
+    #     label="📥 Download Final Profit Report",
+    #     data=profit_xlsx_data,
+    #     file_name="Profit Report.xlsx",
+    # )  # create a downlaod button for the final profit report byte object
+
+    # final_report_donwload = st.download_button(
+    #     label="📥 Download Final PPC Report", data=xlsx_data, file_name="PPC Report.xlsx"
+    # )  # create a downlaod button for the final report byte object
+    # st.success(
+    #     "הדוח הושלם בהצלחה"
+    # )  # write a report as been succsefully generated message
