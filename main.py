@@ -34,6 +34,7 @@ def create_date_list(startDate: str, endDate: str):
     return date_list
 
 
+@st.cache_data
 def generate_bussiness_report(credentials, start_date, end_date, marketplace):
     #  gets a range of date and credentials and output a business report
     report_type = "GET_SALES_AND_TRAFFIC_REPORT"
@@ -54,6 +55,7 @@ def generate_bussiness_report(credentials, start_date, end_date, marketplace):
     return report_id
 
 
+@st.cache_data
 def get_bussiness_report(credentials, report_id, marketplace):
     report_type = "GET_SALES_AND_TRAFFIC_REPORT"
     processing_status = [
@@ -197,6 +199,7 @@ def create_get_business_report(
     return full_business_report, progress
 
 
+@st.cache_data
 def create_reportsByCampaign(headers, url, startDate, endDate):
     data = (
         '''{
@@ -232,6 +235,7 @@ def create_reportsByCampaign(headers, url, startDate, endDate):
     return report_id
 
 
+@st.cache_data
 def get_reportByCampaign(headers, report_id, url):
     response = requests.get(
         url + "/" + report_id,
@@ -340,6 +344,7 @@ def create_get_product_campaigns(
     return full_campaign_report, progress
 
 
+@st.cache_data
 def create_display_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
@@ -395,6 +400,7 @@ def create_display_campaigns_report(
     return display_report_data
 
 
+@st.cache_data
 def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
     data = campaing_report_ids["credentials"][i]
     response = requests.get(
@@ -428,6 +434,7 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         output = pd.read_json(response.json())
 
 
+@st.cache_data
 def create_brand_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
@@ -655,7 +662,6 @@ def JoinAsinsForCampaigns(campaign_df: pd.DataFrame, productByCampaign: pd.DataF
     return summarizeProductsAndCampaingsGroup
 
 
-@st.cache_data
 def generate_ppc_report(
     credentials_df: pd.DataFrame,
     profileId_df: pd.DataFrame,
