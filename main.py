@@ -150,7 +150,7 @@ def create_get_business_report(
     startDate: str,
     endDate: str,
     credentials_df: pd.DataFrame,
-    my_bar,
+    __my_bar,
     progress_text,
     progress,
     progress_unit,
@@ -175,7 +175,7 @@ def create_get_business_report(
         )
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
     report_id_df["got_report"] = ""
     for i in report_id_df.index:
         business_report = get_bussiness_report(
@@ -194,7 +194,7 @@ def create_get_business_report(
         report_id_df["got_report"][i] = report_id_df["marketplace"][i]
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
     return full_business_report, progress
 
 
@@ -276,7 +276,7 @@ def create_get_product_campaigns(
     access_token: str,
     startDate: str,
     endDate: str,
-    my_bar,
+    _my_bar,
     progress_text,
     progress,
     progress_unit,
@@ -311,7 +311,7 @@ def create_get_product_campaigns(
         )
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
     full_campaign_report = pd.DataFrame()
 
     campaing_report_ids[
@@ -339,7 +339,7 @@ def create_get_product_campaigns(
             )  # append the bussiness report to the full_bussiness_report df
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
         campaing_report_ids["got_report"][i] = campaing_report_ids["marketplace"][i]
     return full_campaign_report, progress
 
@@ -491,7 +491,7 @@ def create_get_display_campaign_reports(
     ADS_CLIENT_ID: str,
     access_token: str,
     date_list: list,
-    my_bar,
+    _my_bar,
     progress_text,
     progress,
     progress_unit,
@@ -517,7 +517,7 @@ def create_get_display_campaign_reports(
             )
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
 
     full_campaign_report = pd.DataFrame()
     display_reports_id[
@@ -540,7 +540,7 @@ def create_get_display_campaign_reports(
         display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
     return full_campaign_report, progress
 
 
@@ -550,7 +550,7 @@ def create_get_brand_campaign_reports(
     ADS_CLIENT_ID: str,
     access_token: str,
     date_list: list,
-    my_bar,
+    _my_bar,
     progress_text,
     progress,
     progress_unit,
@@ -576,7 +576,7 @@ def create_get_brand_campaign_reports(
             )
     progress = progress + progress_unit
 
-    my_bar.progress(progress, text=progress_text)
+    _my_bar.progress(progress, text=progress_text)
     full_campaign_report = pd.DataFrame()
     display_reports_id[
         "got_report"
@@ -598,7 +598,7 @@ def create_get_brand_campaign_reports(
             )  # append the bussiness report to the full_bussiness_report df
         progress = progress + progress_unit
 
-        my_bar.progress(progress, text=progress_text)
+        _my_bar.progress(progress, text=progress_text)
 
         display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
     return full_campaign_report, progress
@@ -672,7 +672,7 @@ def generate_ppc_report(
         "Operation in progress. Please wait."  # define the progress bar text
     )
     progress = 0
-    my_bar = st.progress(
+    _my_bar = st.progress(
         progress, text=progress_text
     )  # create a progress bar starting from 0 presenting the progress text
 
@@ -711,7 +711,7 @@ def generate_ppc_report(
         len(date_list) * 4 * len(profileId_df) + 6 * len(profileId_df)
     )  # calculating a progress unit
     progress = 0.05
-    my_bar.progress(
+    _my_bar.progress(
         progress, text=progress_text
     )  # turning the progress bar to 5 precent
 
@@ -723,13 +723,13 @@ def generate_ppc_report(
         ADS_CLIENT_ID,
         access_token,
         date_list,
-        my_bar,
+        _my_bar,
         progress_text,
         progress,
         progress_unit,
     )  # creating the display campaign full report from start to finish
 
-    my_bar.progress(progress, text=progress_text)  # present the progress bar
+    _my_bar.progress(progress, text=progress_text)  # present the progress bar
 
     (
         brand_campaign_full_report,
@@ -739,12 +739,12 @@ def generate_ppc_report(
         ADS_CLIENT_ID,
         access_token,
         date_list,
-        my_bar,
+        _my_bar,
         progress_text,
         progress,
         progress_unit,
     )  # creating the brand campaign full report from start to finish
-    my_bar.progress(progress, text=progress_text)  # present the progress bar
+    _my_bar.progress(progress, text=progress_text)  # present the progress bar
 
     (
         product_campaigns_full_report,
@@ -755,12 +755,12 @@ def generate_ppc_report(
         access_token,
         startDate,
         endDate,
-        my_bar,
+        _my_bar,
         progress_text,
         progress,
         progress_unit,
     )  # creating the sponsered ads product campaign full report from start to finish
-    my_bar.progress(progress, text=progress_text)  # present the progress bar
+    _my_bar.progress(progress, text=progress_text)  # present the progress bar
 
     display_df = display_campaign_full_report.rename(
         columns={
@@ -791,13 +791,13 @@ def generate_ppc_report(
         startDate,
         endDate,
         credentials_df,
-        my_bar,
+        _my_bar,
         progress_text,
         progress,
         progress_unit,
     )  # getting the full business report
 
-    my_bar.progress(0.95, progress_text)  # setting the progress bar to 95 precent
+    _my_bar.progress(0.95, progress_text)  # setting the progress bar to 95 precent
 
     summarizeProductsAndCampaingsGroup["Asin"] = summarizeProductsAndCampaingsGroup[
         "Asin"
@@ -962,7 +962,7 @@ def generate_ppc_report(
     )  # calculating the profit after ppc
     profit_df = profit_df.drop_duplicates()  # dropping duplicates from the profit df
 
-    my_bar.progress(1)
+    _my_bar.progress(1)
 
     return summarizeProductsAndCampaingsWithReport, profit_df
 
