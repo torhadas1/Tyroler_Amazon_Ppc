@@ -403,7 +403,7 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
         headers=data,
     )
-    if response.json()["status"]:
+    if "status" in response.json().columns:
         while response.json()["status"] == "IN_PROGRESS":
             print("sleeping...")
             time.sleep(5)
@@ -448,7 +448,13 @@ def create_brand_campaigns_report(
     try:
         if response.status_code == 429:
             time.sleep(6)
+            response = requests.post(
+                profileId_df["url_v2_post"][i],
+                headers=ads_headers_v2,
+                json=json_data,
+            )
             report_id = response.json()["reportId"]
+
 
             display_report_data = {
                 "report_id": report_id,
