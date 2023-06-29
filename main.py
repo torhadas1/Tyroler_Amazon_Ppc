@@ -16,7 +16,6 @@ from io import BytesIO
 import zipfile
 
 
-@st.cache_data(ttl=3000)
 def new_access_token(credentials):
     data = credentials
     data.update({"grant_type": "refresh_token"})
@@ -34,7 +33,6 @@ def create_date_list(startDate: str, endDate: str):
     return date_list
 
 
-@st.cache_data
 def generate_bussiness_report(credentials, start_date, end_date, marketplace):
     #  gets a range of date and credentials and output a business report
     report_type = "GET_SALES_AND_TRAFFIC_REPORT"
@@ -55,7 +53,6 @@ def generate_bussiness_report(credentials, start_date, end_date, marketplace):
     return report_id
 
 
-@st.cache_data
 def get_bussiness_report(credentials, report_id, marketplace):
     report_type = "GET_SALES_AND_TRAFFIC_REPORT"
     processing_status = [
@@ -151,7 +148,7 @@ def create_get_business_report(
     startDate: str,
     endDate: str,
     credentials_df: pd.DataFrame,
-    __my_bar,
+    _my_bar,
     progress_text,
     progress,
     progress_unit,
@@ -199,7 +196,6 @@ def create_get_business_report(
     return full_business_report, progress
 
 
-@st.cache_data
 def create_reportsByCampaign(headers, url, startDate, endDate):
     data = (
         '''{
@@ -235,7 +231,6 @@ def create_reportsByCampaign(headers, url, startDate, endDate):
     return report_id
 
 
-@st.cache_data
 def get_reportByCampaign(headers, report_id, url):
     response = requests.get(
         url + "/" + report_id,
@@ -344,7 +339,6 @@ def create_get_product_campaigns(
     return full_campaign_report, progress
 
 
-@st.cache_data
 def create_display_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
@@ -400,7 +394,6 @@ def create_display_campaigns_report(
     return display_report_data
 
 
-@st.cache_data
 def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
     data = campaing_report_ids["credentials"][i]
     response = requests.get(
@@ -434,7 +427,6 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         output = pd.read_json(response.json())
 
 
-@st.cache_data
 def create_brand_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
@@ -717,52 +709,168 @@ def generate_ppc_report(
         progress, text=progress_text
     )  # turning the progress bar to 5 precent
 
-    (
-        display_campaign_full_report,
-        progress,
-    ) = create_get_display_campaign_reports(
-        profileId_df,
-        ADS_CLIENT_ID,
-        access_token,
-        date_list,
-        _my_bar,
-        progress_text,
-        progress,
-        progress_unit,
-    )  # creating the display campaign full report from start to finish
+    display_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
+    brand_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
 
-    _my_bar.progress(progress, text=progress_text)  # present the progress bar
+    for i in profileId_df.index:
+        ads_headers_v2 = {
+            "Content-Type": "application/json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }
 
-    (
-        brand_campaign_full_report,
-        progress,
-    ) = create_get_brand_campaign_reports(
-        profileId_df,
-        ADS_CLIENT_ID,
-        access_token,
-        date_list,
-        _my_bar,
-        progress_text,
-        progress,
-        progress_unit,
-    )  # creating the brand campaign full report from start to finish
-    _my_bar.progress(progress, text=progress_text)  # present the progress bar
+        for date in date_list:
+            display_campaign_report_id = create_display_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            display_reports_id = display_reports_id._append(
+                display_campaign_report_id, ignore_index=True
+            )
+            brand_campaign_report_id = create_brand_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            brand_reports_id = brand_reports_id._append(
+                brand_campaign_report_id, ignore_index=True
+            )
+            progress = progress + progress_unit * 2
 
-    (
-        product_campaigns_full_report,
-        progress,
-    ) = create_get_product_campaigns(
-        profileId_df,
-        ADS_CLIENT_ID,
-        access_token,
-        startDate,
-        endDate,
-        _my_bar,
-        progress_text,
-        progress,
-        progress_unit,
-    )  # creating the sponsered ads product campaign full report from start to finish
-    _my_bar.progress(progress, text=progress_text)  # present the progress bar
+        _my_bar.progress(progress, text=progress_text)
+
+    product_campaing_report_ids = pd.DataFrame(
+        columns=["report_id", "profile_id", "marketplace", "credentials", "url"]
+    )
+    for i in profileId_df.index:
+        ads_headers = {
+            "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }  # header for the report generation
+
+        report_id = create_reportsByCampaign(
+            ads_headers,
+            profileId_df["url"][i],
+            startDate,
+            endDate,
+        )  # creating a report and getting the report_id
+
+        product_campaing_report_ids = product_campaing_report_ids._append(
+            {
+                "report_id": report_id,
+                "profile_id": profileId_df["profile_id"][i],
+                "marketplace": profileId_df["marketplace"][i],
+                "credentials": ads_headers,
+                "url": profileId_df["url"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    report_id_df = pd.DataFrame(columns=["marketplace", "report_id", "credentials"])
+    full_business_report = pd.DataFrame()
+    for i in profileId_df.index:
+        report_id = generate_bussiness_report(
+            credentials_df[profileId_df["credentials"][i]].to_dict(),
+            startDate,
+            endDate,
+            profileId_df["marketplace"][i],
+        )
+
+        report_id_df = report_id_df._append(
+            {
+                "marketplace": profileId_df["marketplace"][i],
+                "report_id": report_id,
+                "credentials": profileId_df["credentials"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    full_product_campaign_report = pd.DataFrame()
+
+    product_campaing_report_ids[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in product_campaing_report_ids.index:
+        product_campagin_data_df = get_reportByCampaign(
+            product_campaing_report_ids["credentials"][i],
+            product_campaing_report_ids["report_id"][i],
+            product_campaing_report_ids["url"][i],
+        )  # getting the report for the campaign preformence for every marketplace
+
+        product_campagin_data_df["marketplace"] = product_campaing_report_ids[
+            "marketplace"
+        ][
+            i
+        ]  # adding a column with the market place to the campaigns
+
+        if (
+            full_product_campaign_report is None
+        ):  # if there is no df named full_campaign_report
+            full_product_campaign_report = product_campagin_data_df  # create one with the first full bussiness report
+        else:
+            full_product_campaign_report = full_product_campaign_report._append(
+                product_campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+        product_campaing_report_ids["got_report"][i] = product_campaing_report_ids[
+            "marketplace"
+        ][i]
+    product_campaigns_full_report = full_product_campaign_report
+
+    _my_bar.progress(progress, text=progress_text)
+    full_campaign_report = pd.DataFrame()
+    full_brand_report = pd.DataFrame()
+    brand_reports_id["got_report"] = ""
+    display_reports_id[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in display_reports_id.index:
+        campagin_data_df = get_campaigns_report_v2(
+            display_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_campaign_report is None:  # if there is no df named full_campaign_report
+            full_campaign_report = (
+                campagin_data_df  # create one with the first full bussiness report
+            )
+        else:
+            full_campaign_report = full_campaign_report._append(
+                campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
+        progress = progress + progress_unit
+        _my_bar.progress(progress, text=progress_text)
+    display_campaign_full_report = full_campaign_report
+
+    for i in brand_reports_id.index:
+        brand_campagin_data_df = get_campaigns_report_v2(
+            brand_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_brand_report is None:  # if there is no df named full_campaign_report
+            full_brand_report = brand_campagin_data_df  # create one with the first full bussiness report
+        else:
+            full_brand_report = full_brand_report._append(
+                brand_campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        brand_reports_id["got_report"][i] = brand_reports_id["marketplace"][i]
+        progress = progress + progress_unit
+        _my_bar.progress(progress, text=progress_text)
+    brand_campaign_full_report = full_brand_report
 
     display_df = display_campaign_full_report.rename(
         columns={
@@ -788,16 +896,25 @@ def generate_ppc_report(
         campaign_df, productByCampaign
     )  # Join the Asins of the products to the campaigns data
 
-    full_business_report, progress = create_get_business_report(
-        profileId_df,
-        startDate,
-        endDate,
-        credentials_df,
-        _my_bar,
-        progress_text,
-        progress,
-        progress_unit,
-    )  # getting the full business report
+    report_id_df["got_report"] = ""
+    for i in report_id_df.index:
+        business_report = get_bussiness_report(
+            credentials_df[report_id_df["credentials"][i]].to_dict(),
+            report_id_df["report_id"][i],
+            report_id_df["marketplace"][i],
+        )
+        if full_business_report is None:  # if there is no df named full_campaign_report
+            full_business_report = (
+                business_report  # create one with the first full bussiness report
+            )
+        else:
+            full_business_report = full_business_report._append(
+                business_report
+            )  # append the bussiness report to the full_bussiness_report df
+        report_id_df["got_report"][i] = report_id_df["marketplace"][i]
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
 
     _my_bar.progress(0.95, progress_text)  # setting the progress bar to 95 precent
 
