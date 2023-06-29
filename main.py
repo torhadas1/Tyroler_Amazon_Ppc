@@ -401,7 +401,7 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
         headers=data,
     )
-    if "status" in response.json().columns:
+    if "status" in response.json():
         while response.json()["status"] == "IN_PROGRESS":
             print("sleeping...")
             time.sleep(5)
