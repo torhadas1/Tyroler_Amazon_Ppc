@@ -144,7 +144,6 @@ def get_bussiness_report(credentials, report_id, marketplace):
         return df
 
 
-@st.cache_data
 def create_get_business_report(
     profile_id_df: pd.DataFrame,
     startDate: str,
@@ -267,7 +266,6 @@ def get_reportByCampaign(headers, report_id, url):
     return output
 
 
-@st.cache_data
 def create_get_product_campaigns(
     profileId_df: pd.DataFrame,
     ADS_CLIENT_ID: str,
@@ -455,7 +453,6 @@ def create_brand_campaigns_report(
             )
             report_id = response.json()["reportId"]
 
-
             display_report_data = {
                 "report_id": report_id,
                 "date": date,
@@ -486,7 +483,6 @@ def create_brand_campaigns_report(
     return display_report_data
 
 
-@st.cache_data
 def create_get_display_campaign_reports(
     profileId_df: pd.DataFrame,
     ADS_CLIENT_ID: str,
@@ -545,7 +541,6 @@ def create_get_display_campaign_reports(
     return full_campaign_report, progress
 
 
-@st.cache_data
 def create_get_brand_campaign_reports(
     profileId_df: pd.DataFrame,
     ADS_CLIENT_ID: str,
@@ -660,6 +655,7 @@ def JoinAsinsForCampaigns(campaign_df: pd.DataFrame, productByCampaign: pd.DataF
     return summarizeProductsAndCampaingsGroup
 
 
+@st.cache_data
 def generate_ppc_report(
     credentials_df: pd.DataFrame,
     profileId_df: pd.DataFrame,
