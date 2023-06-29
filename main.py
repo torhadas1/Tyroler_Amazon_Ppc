@@ -654,7 +654,6 @@ def JoinAsinsForCampaigns(campaign_df: pd.DataFrame, productByCampaign: pd.DataF
     return summarizeProductsAndCampaingsGroup
 
 
-@st.cache_data
 def generate_ppc_report(
     credentials_df: pd.DataFrame,
     profileId_df: pd.DataFrame,
