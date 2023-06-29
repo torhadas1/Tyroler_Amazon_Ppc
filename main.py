@@ -198,7 +198,6 @@ def create_get_business_report(
     return full_business_report, progress
 
 
-@st.cache_data
 def create_reportsByCampaign(headers, url, startDate, endDate):
     data = (
         '''{
@@ -234,7 +233,6 @@ def create_reportsByCampaign(headers, url, startDate, endDate):
     return report_id
 
 
-@st.cache_data
 def get_reportByCampaign(headers, report_id, url):
     response = requests.get(
         url + "/" + report_id,
@@ -344,7 +342,6 @@ def create_get_product_campaigns(
     return full_campaign_report, progress
 
 
-@st.cache_data
 def create_display_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
@@ -400,7 +397,6 @@ def create_display_campaigns_report(
     return display_report_data
 
 
-@st.cache_data
 def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
     data = campaing_report_ids["credentials"][i]
     response = requests.get(
@@ -434,7 +430,6 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         output = pd.read_json(response.json())
 
 
-@st.cache_data
 def create_brand_campaigns_report(
     profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
 ):
