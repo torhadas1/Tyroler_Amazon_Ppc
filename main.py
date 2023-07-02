@@ -199,7 +199,7 @@ def create_get_business_report(
 def create_reportsByCampaign(headers, url, startDate, endDate):
     data = (
         '''{
-        "name":"SP campaigns report 5/8-5/22",
+        "name":"SP campaigns report",
         "startDate":"'''
         + startDate
         + """",
@@ -1002,20 +1002,39 @@ def generate_ppc_report(
         summarizeProductsAndCampaingsWithReport.rename(
             columns={
                 "sku": "Product Name",
+                "Acos": "Avg Acos %",
                 "date": "Check Date",
                 "period": "Period",
                 "real_spend": "Campaign Spend",
                 "UnitPrice": "Sale Price",
-                "real_sales": "Period Sales",
                 "real_ordered": "Unit Sales From PPC",
-                "DailySales": "Daily Sales",
+                "DailySales": "Unit Daily Sales",
                 "ppcCostPerUnit": "PPC Cost Without Organic Sales",
                 "unitsOrdered": "Unit Sales Total",
                 "unitSessionPercentage": "Unit Session %",
                 "amount": "Total Sales",
             }
         )
-    )  # renaming the columns of the df
+    )
+    # renaming the columns of the df
+    summarizeProductsAndCampaingsWithReport[
+        "Check Date"
+    ] = summarizeProductsAndCampaingsWithReport["Check Date"].dt.date
+    summarizeProductsAndCampaingsWithReport["Start Date"] = startDatetime
+    summarizeProductsAndCampaingsWithReport[
+        "Start Date"
+    ] = summarizeProductsAndCampaingsWithReport["Start Date"].dt.date
+
+    summarizeProductsAndCampaingsWithReport["End Date"] = endDatetime
+    summarizeProductsAndCampaingsWithReport[
+        "End Date"
+    ] = summarizeProductsAndCampaingsWithReport["End Date"].dt.date
+    summarizeProductsAndCampaingsWithReport["Total PPC Cost Per Unit"] = (
+        summarizeProductsAndCampaingsWithReport["Campaign Spend"]
+        / summarizeProductsAndCampaingsWithReport["Unit Sales Total"]
+    )
+    summarizeProductsAndCampaingsWithReport["Rating"] = ""
+    summarizeProductsAndCampaingsWithReport["Notes"] = ""
 
     profit_df["ASIN"] = profit_df[
         "ASIN"
@@ -1031,23 +1050,50 @@ def generate_ppc_report(
     )
 
     summarizeProductsAndCampaingsWithReport[
-        "Profit Per Unit"
+        "Profit Per Unit After PPC ILS"
     ] = summarizeProductsAndCampaingsWithReport[
         "profit without PPC"
     ] - summarizeProductsAndCampaingsWithReport[
-        "PPC Cost Without Organic Sales"
+        "Total PPC Cost Per Unit"
     ].fillna(
         0
     )  # calculating the profit per unit
 
-    summarizeProductsAndCampaingsWithReport["profit Revenue"] = (
-        summarizeProductsAndCampaingsWithReport["Profit Per Unit"]
+    summarizeProductsAndCampaingsWithReport["Profit 30 Days ILS"] = (
+        summarizeProductsAndCampaingsWithReport["Profit Per Unit After PPC ILS"]
         * (
             summarizeProductsAndCampaingsWithReport["Unit Sales From PPC"]
             / summarizeProductsAndCampaingsWithReport["Period"]
         )
     ) * 30  # calculating the profit revenue(monthly revenue)
 
+    summarizeProductsAndCampaingsWithReport = summarizeProductsAndCampaingsWithReport[
+        [
+            "marketplace",
+            "Category",
+            "Asin",
+            "Product Name",
+            "Check Date",
+            "Start Date",
+            "End Date",
+            "Period",
+            "Unit Sales Total",
+            "Unit Daily Sales",
+            "Unit Session %",
+            "Sale Price",
+            "Rating",
+            "Unit Sales From PPC",
+            "Campaign Spend",
+            "PPC Cost Without Organic Sales",
+            "Total PPC Cost Per Unit",
+            "Avg Acos %",
+            "Profit Per Unit After PPC ILS",
+            "Profit 30 Days ILS",
+            "Total Sales",
+            "profit without PPC",
+            "Notes",
+        ]
+    ]
     profit_df = profit_df[
         [
             "Country",
@@ -1063,21 +1109,19 @@ def generate_ppc_report(
         ]
     ].merge(
         summarizeProductsAndCampaingsWithReport[
-            ["Asin", "marketplace", "PPC Cost Without Organic Sales"]
+            ["Asin", "marketplace", "Total PPC Cost Per Unit"]
         ],
         how="left",
         left_on=["Country", "ASIN"],
         right_on=["marketplace", "Asin"],
     )  # merging the profit df and the full report on country and asin
 
-    profit_df["PPC Cost Without Organic Sales"] = profit_df[
-        "PPC Cost Without Organic Sales"
-    ].fillna(
+    profit_df["Total PPC Cost Per Unit"] = profit_df["Total PPC Cost Per Unit"].fillna(
         0
     )  # filling ppc cost without organic sales na's with 0
 
     profit_df["profit after ppc"] = (
-        profit_df["profit without PPC"] - profit_df["PPC Cost Without Organic Sales"]
+        profit_df["profit without PPC"] - profit_df["Total PPC Cost Per Unit"]
     )  # calculating the profit after ppc
     profit_df = profit_df.drop_duplicates()  # dropping duplicates from the profit df
 
@@ -1154,10 +1198,6 @@ if run:  # if the button is pressed
         credentials, profile_id_df, ProductByCampaign_df, profit_df, startDate, endDate
     )  # generate the ppc and profit report
 
-    final_report = final_report.drop(
-        ["ASIN", "Country"], axis=1
-    )  # dropping unnessecary columns
-
     xlsx_data = BytesIO()  # create an empty bytes object
     with pd.ExcelWriter(
         xlsx_data, engine="openpyxl"
@@ -1193,19 +1233,4 @@ if run:  # if the button is pressed
     download = st.download_button(
         label="📥 Download Reports", data=zip_buffer, file_name="Reports.zip"
     )  # a download button for the zip file
-    st.success(
-        "הניטור הושלם בהצלחה"
-    )  # write a report as been succsefully generated message
-
-    # profit_report_download = st.download_button(
-    #     label="📥 Download Final Profit Report",
-    #     data=profit_xlsx_data,
-    #     file_name="Profit Report.xlsx",
-    # )  # create a downlaod button for the final profit report byte object
-
-    # final_report_donwload = st.download_button(
-    #     label="📥 Download Final PPC Report", data=xlsx_data, file_name="PPC Report.xlsx"
-    # )  # create a downlaod button for the final report byte object
-    # st.success(
-    #     "הדוח הושלם בהצלחה"
-    # )  # write a report as been succsefully generated message
+    st.success("הניטור הושלם בהצלחה")
