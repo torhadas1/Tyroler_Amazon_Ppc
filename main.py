@@ -424,8 +424,8 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         return output
     else:
         print(response.json())
-        output = pd.DataFrame(response.json())
-        output["marketplace"] = campaing_report_ids["marketplace"]
+        data_dict = response.json()  # suppose this is your dictionary
+        output = pd.DataFrame([data_dict])
         return output
 
 
