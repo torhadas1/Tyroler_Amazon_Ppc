@@ -250,7 +250,7 @@ def get_reportByCampaign(headers, report_id, url):
     url = response.json()["url"]
     if url == None:
         print(response.json())
-        output = pd.read_json(response.json())
+        output = pd.DataFrame(response.json())
 
     print(url)
     response = requests.get(
@@ -424,7 +424,9 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         return output
     else:
         print(response.json())
-        output = pd.read_json(response.json())
+        output = pd.DataFrame(response.json())
+        output["marketplace"] = campaing_report_ids["marketplace"]
+        return output
 
 
 def create_brand_campaigns_report(
@@ -954,6 +956,11 @@ def generate_ppc_report(
     summarizeProductsAndCampaingsWithReport["period"] = delta / pd.Timedelta(
         days=1
     )  # the period of the report in days
+
+    summarizeProductsAndCampaingsWithReport["period"] = (
+        summarizeProductsAndCampaingsWithReport["period"] + 1
+    )
+    # the period of the report in days
 
     summarizeProductsAndCampaingsWithReport["DailySales"] = (
         summarizeProductsAndCampaingsWithReport["unitsOrdered"]
