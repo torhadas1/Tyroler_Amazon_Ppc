@@ -419,7 +419,7 @@ def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
         compressed_file = io.BytesIO(response.content)  # extract .gz file
         decompressed_file = gzip.GzipFile(fileobj=compressed_file)  # unzip .gz file
         output = pd.read_json(decompressed_file)
-        output["marketplace"] = campaing_report_ids["marketplace"]
+        output["marketplace"] = campaing_report_ids["marketplace"][i]
 
         return output
     else:
@@ -436,6 +436,7 @@ def create_brand_campaigns_report(
         "reportDate": date,
         "metrics": "campaignName,cost,attributedUnitsOrdered14d,attributedSales14d,attributedConversions14d",
         "creativeType": "all",
+        "segment": "placement",
     }
 
     response = requests.post(
@@ -784,7 +785,6 @@ def generate_ppc_report(
             endDate,
             profileId_df["marketplace"][i],
         )
-
         report_id_df = report_id_df._append(
             {
                 "marketplace": profileId_df["marketplace"][i],
@@ -798,6 +798,12 @@ def generate_ppc_report(
         _my_bar.progress(progress, text=progress_text)
 
     full_product_campaign_report = pd.DataFrame()
+
+    st.session_state["sponsered_products_report_ids"] = product_campaing_report_ids
+    st.session_state["sponsered_display_report_ids"] = display_reports_id
+    st.session_state["sponsered_brand_report_ids"] = brand_reports_id
+    st.session_state["bussiness_report_ids"] = report_id_df
+    st.write(st.session_state)
 
     product_campaing_report_ids[
         "got_report"
@@ -857,7 +863,6 @@ def generate_ppc_report(
         progress = progress + progress_unit
         _my_bar.progress(progress, text=progress_text)
     display_campaign_full_report = full_campaign_report
-
     for i in brand_reports_id.index:
         brand_campagin_data_df = get_campaigns_report_v2(
             brand_reports_id, i
@@ -881,7 +886,7 @@ def generate_ppc_report(
             "attributedSales14d": "sales7d",
         }
     )  # renaming the columns of the display campaing to match the other reports
-
+    display_df.to_excel("./Display_campaigns.xlsx")
     brand_df = brand_campaign_full_report.rename(
         columns={
             "cost": "spend",
@@ -889,7 +894,8 @@ def generate_ppc_report(
             "attributedSales14d": "sales7d",
         }
     )  # renaming the columns of the display campaing  to match the other reports
-
+    brand_df.to_excel("./brand_campaigns.xlsx")
+    product_campaigns_full_report.to_excel("./product_campaigns.xlsx")
     campaign_df = product_campaigns_full_report._append(display_df)._append(
         brand_df
     )  # appending all the campaign reports together to a single df
@@ -925,6 +931,514 @@ def generate_ppc_report(
     ].str.rstrip()  # striping extra white space on the Asin column
 
     full_business_report["childAsin"] = full_business_report["childAsin"].str.rstrip()
+    full_business_report.to_excel("./Bussiness_report.xlsx")
+    summarizeProductsAndCampaingsWithReport = summarizeProductsAndCampaingsGroup.merge(
+        full_business_report[
+            [
+                "unitsOrdered",
+                "childAsin",
+                "sku",
+                "unitSessionPercentage",
+                "amount",
+                "marketplace",
+            ]
+        ],
+        left_on=["Asin", "marketplace"],
+        right_on=["childAsin", "marketplace"],
+        how="left",
+    )  # joining the ppc report with the  business report on marketplace and Asin
+
+    summarizeProductsAndCampaingsWithReport["UnitPrice"] = (
+        summarizeProductsAndCampaingsWithReport["amount"]
+        / summarizeProductsAndCampaingsWithReport["unitsOrdered"]
+    )  # calculating the price of one unit
+
+    # convert string to date object
+    startDatetime = datetime.strptime(startDate, "%Y-%m-%d")
+    endDatetime = datetime.strptime(endDate, "%Y-%m-%d")
+
+    # difference between dates in timedelta
+    delta = endDatetime - startDatetime
+
+    summarizeProductsAndCampaingsWithReport["period"] = delta / pd.Timedelta(
+        days=1
+    )  # the period of the report in days
+
+    summarizeProductsAndCampaingsWithReport["period"] = (
+        summarizeProductsAndCampaingsWithReport["period"] + 1
+    )
+    # the period of the report in days
+
+    summarizeProductsAndCampaingsWithReport["DailySales"] = (
+        summarizeProductsAndCampaingsWithReport["unitsOrdered"]
+        / summarizeProductsAndCampaingsWithReport["period"]
+    )  # calculating the units ordered per day
+
+    summarizeProductsAndCampaingsWithReport["ppcCostPerUnit"] = (
+        summarizeProductsAndCampaingsWithReport["real_spend"]
+        / summarizeProductsAndCampaingsWithReport["real_ordered"]
+    )  # calculating the ppc cost per unit
+
+    summarizeProductsAndCampaingsWithReport["Acos"] = (
+        summarizeProductsAndCampaingsWithReport["real_spend"]
+        / summarizeProductsAndCampaingsWithReport["real_sales"]
+    )  # calculating the Acos
+
+    summarizeProductsAndCampaingsWithReport[
+        "date"
+    ] = datetime.today()  # filling the date column wwith todays date
+
+    summarizeProductsAndCampaingsWithReport = summarizeProductsAndCampaingsWithReport[
+        [
+            "marketplace",
+            "Category",
+            "Asin",
+            "sku",
+            "date",
+            "period",
+            "real_spend",
+            "real_sales",
+            "amount",
+            "real_ordered",
+            "unitsOrdered",
+            "DailySales",
+            "unitSessionPercentage",
+            "ppcCostPerUnit",
+            "UnitPrice",
+            "Acos",
+        ]
+    ]  # filtering the df for importanet columns
+    summarizeProductsAndCampaingsWithReport = (
+        summarizeProductsAndCampaingsWithReport.sort_values(by="marketplace")
+    )
+
+    summarizeProductsAndCampaingsWithReport = (
+        summarizeProductsAndCampaingsWithReport.rename(
+            columns={
+                "sku": "Product Name",
+                "Acos": "Avg Acos %",
+                "date": "Check Date",
+                "period": "Period",
+                "real_spend": "Campaign Spend",
+                "UnitPrice": "Sale Price",
+                "real_ordered": "Unit Sales From PPC",
+                "DailySales": "Unit Daily Sales",
+                "ppcCostPerUnit": "PPC Cost Without Organic Sales",
+                "unitsOrdered": "Unit Sales Total",
+                "unitSessionPercentage": "Unit Session %",
+                "amount": "Total Sales",
+            }
+        )
+    )
+    # renaming the columns of the df
+    summarizeProductsAndCampaingsWithReport[
+        "Check Date"
+    ] = summarizeProductsAndCampaingsWithReport["Check Date"].dt.date
+    summarizeProductsAndCampaingsWithReport["Start Date"] = startDatetime
+    summarizeProductsAndCampaingsWithReport[
+        "Start Date"
+    ] = summarizeProductsAndCampaingsWithReport["Start Date"].dt.date
+
+    summarizeProductsAndCampaingsWithReport["End Date"] = endDatetime
+    summarizeProductsAndCampaingsWithReport[
+        "End Date"
+    ] = summarizeProductsAndCampaingsWithReport["End Date"].dt.date
+    summarizeProductsAndCampaingsWithReport["Total PPC Cost Per Unit"] = (
+        summarizeProductsAndCampaingsWithReport["Campaign Spend"]
+        / summarizeProductsAndCampaingsWithReport["Unit Sales Total"]
+    )
+    summarizeProductsAndCampaingsWithReport["Rating"] = ""
+    summarizeProductsAndCampaingsWithReport["Notes"] = ""
+
+    profit_df["ASIN"] = profit_df[
+        "ASIN"
+    ].str.rstrip()  # right striping the series for extra spaces
+
+    summarizeProductsAndCampaingsWithReport = (
+        summarizeProductsAndCampaingsWithReport.merge(
+            profit_df[["profit without PPC", "ASIN", "Country"]],
+            left_on=["marketplace", "Asin"],
+            right_on=["Country", "ASIN"],
+            how="left",
+        )  # merging the profit df with the full report based on asin and marketplace
+    )
+
+    summarizeProductsAndCampaingsWithReport[
+        "Profit Per Unit After PPC ILS"
+    ] = summarizeProductsAndCampaingsWithReport[
+        "profit without PPC"
+    ] - summarizeProductsAndCampaingsWithReport[
+        "Total PPC Cost Per Unit"
+    ].fillna(
+        0
+    )  # calculating the profit per unit
+
+    summarizeProductsAndCampaingsWithReport["Profit 30 Days ILS"] = (
+        summarizeProductsAndCampaingsWithReport["Profit Per Unit After PPC ILS"]
+        * (
+            summarizeProductsAndCampaingsWithReport["Unit Sales From PPC"]
+            / summarizeProductsAndCampaingsWithReport["Period"]
+        )
+    ) * 30  # calculating the profit revenue(monthly revenue)
+
+    summarizeProductsAndCampaingsWithReport = summarizeProductsAndCampaingsWithReport[
+        [
+            "marketplace",
+            "Category",
+            "Asin",
+            "Product Name",
+            "Check Date",
+            "Start Date",
+            "End Date",
+            "Period",
+            "Unit Sales Total",
+            "Unit Daily Sales",
+            "Unit Session %",
+            "Sale Price",
+            "Rating",
+            "Unit Sales From PPC",
+            "Campaign Spend",
+            "PPC Cost Without Organic Sales",
+            "Total PPC Cost Per Unit",
+            "Avg Acos %",
+            "Profit Per Unit After PPC ILS",
+            "Profit 30 Days ILS",
+            "Total Sales",
+            "profit without PPC",
+            "Notes",
+        ]
+    ]
+    profit_df = profit_df[
+        [
+            "Country",
+            "ASIN",
+            "Tyroler Code",
+            "Product",
+            "Price",
+            "Currency conversion ILS",
+            "amazon shipment fee",
+            "product cost",
+            "profit without PPC",
+            "Shipment cost to amazon",
+        ]
+    ].merge(
+        summarizeProductsAndCampaingsWithReport[
+            ["Asin", "marketplace", "Total PPC Cost Per Unit"]
+        ],
+        how="left",
+        left_on=["Country", "ASIN"],
+        right_on=["marketplace", "Asin"],
+    )  # merging the profit df and the full report on country and asin
+
+    profit_df["Total PPC Cost Per Unit"] = profit_df["Total PPC Cost Per Unit"].fillna(
+        0
+    )  # filling ppc cost without organic sales na's with 0
+
+    profit_df["profit after ppc"] = (
+        profit_df["profit without PPC"] - profit_df["Total PPC Cost Per Unit"]
+    )  # calculating the profit after ppc
+    profit_df = profit_df.drop_duplicates()  # dropping duplicates from the profit df
+
+    _my_bar.progress(1)
+
+    return summarizeProductsAndCampaingsWithReport, profit_df
+
+
+def request_report_generation(
+    credentials_df: pd.DataFrame,
+    profileId_df: pd.DataFrame,
+    productByCampaign: pd.DataFrame,
+    startDate: str,
+    endDate: str,
+):
+    progress_text = (
+        "Operation in progress. Please wait."  # define the progress bar text
+    )
+    progress = 0
+    _my_bar = st.progress(
+        progress, text=progress_text
+    )  # create a progress bar starting from 0 presenting the progress text
+
+    productByCampaign = (
+        productByCampaign.drop_duplicates()
+    )  # dropping duplicates in the product_campagin df
+
+    profileId_df["profile_id"] = profileId_df["profile_id"].astype(
+        str
+    )  # define the profile_id as strings
+
+    profileId_df = profileId_df[
+        profileId_df["marketplace"].isin(productByCampaign["marketplace"])
+    ]  # Filtering the profile ids df to contain only marketplaces with campaigns
+
+    # define the amazon ads credentials
+    ADS_REFRESH_TOKEN = credentials_df["ads_api"]["ADS_REFRESH_TOKEN"]
+    ADS_CLIENT_ID = credentials_df["ads_api"]["ADS_CLIENT_ID"]
+    ADS_CLIENT_SECRET = credentials_df["ads_api"]["ADS_CLIENT_SECRET"]
+
+    ads_headers_refresh = {
+        "client_id": ADS_CLIENT_ID,
+        "refresh_token": ADS_REFRESH_TOKEN,
+        "client_secret": ADS_CLIENT_SECRET,
+    }  # define the headers for the access token generation
+
+    access_token = new_access_token(ads_headers_refresh)  # generate new access token
+    startDate = startDate  # start date to be filled by GUI
+    endDate = endDate  # start date to be filled by GUI
+
+    date_list = create_date_list(
+        startDate, endDate
+    )  # creating a list of all the dates between the first and last date
+
+    progress_unit = 0.9 / (
+        len(date_list) * 4 * len(profileId_df) + 6 * len(profileId_df)
+    )  # calculating a progress unit
+    progress = 0.05
+    _my_bar.progress(
+        progress, text=progress_text
+    )  # turning the progress bar to 5 precent
+
+    display_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
+    brand_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
+
+    for i in profileId_df.index:
+        ads_headers_v2 = {
+            "Content-Type": "application/json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }
+
+        for date in date_list:
+            display_campaign_report_id = create_display_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            display_reports_id = display_reports_id._append(
+                display_campaign_report_id, ignore_index=True
+            )
+            brand_campaign_report_id = create_brand_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            brand_reports_id = brand_reports_id._append(
+                brand_campaign_report_id, ignore_index=True
+            )
+            progress = progress + progress_unit * 2
+
+        _my_bar.progress(progress, text=progress_text)
+
+    product_campaing_report_ids = pd.DataFrame(
+        columns=["report_id", "profile_id", "marketplace", "credentials", "url"]
+    )
+    for i in profileId_df.index:
+        ads_headers = {
+            "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }  # header for the report generation
+
+        report_id = create_reportsByCampaign(
+            ads_headers,
+            profileId_df["url"][i],
+            startDate,
+            endDate,
+        )  # creating a report and getting the report_id
+
+        product_campaing_report_ids = product_campaing_report_ids._append(
+            {
+                "report_id": report_id,
+                "profile_id": profileId_df["profile_id"][i],
+                "marketplace": profileId_df["marketplace"][i],
+                "credentials": ads_headers,
+                "url": profileId_df["url"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    report_id_df = pd.DataFrame(columns=["marketplace", "report_id", "credentials"])
+    full_business_report = pd.DataFrame()
+    for i in profileId_df.index:
+        report_id = generate_bussiness_report(
+            credentials_df[profileId_df["credentials"][i]].to_dict(),
+            startDate,
+            endDate,
+            profileId_df["marketplace"][i],
+        )
+        report_id_df = report_id_df._append(
+            {
+                "marketplace": profileId_df["marketplace"][i],
+                "report_id": report_id,
+                "credentials": profileId_df["credentials"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    st.session_state["progress"] = progress
+    st.session_state["sponsered_products_report_ids"] = product_campaing_report_ids
+    st.session_state["sponsered_display_report_ids"] = display_reports_id
+    st.session_state["sponsered_brand_report_ids"] = brand_reports_id
+    st.session_state["bussiness_report_ids"] = report_id_df
+    # st.dataframe(st.session_state["sponsered_products_report_ids"])
+    # st.dataframe(st.session_state["sponsered_display_report_ids"])
+    # st.dataframe(st.session_state["sponsered_brand_report_ids"])
+    # st.dataframe(st.session_state["bussiness_report_ids"])
+
+    product_campaing_report_ids[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+    return _my_bar, progress_text, progress_unit
+
+
+def pull_reports_generate_report(
+    product_campaing_report_ids: pd.DataFrame,
+    brand_reports_id: pd.DataFrame,
+    display_reports_id: pd.DataFrame,
+    report_id_df: pd.DataFrame,
+    _my_bar,
+    progress_text,
+    progress_unit,
+    productByCampaign,
+    credentials_df,
+    profit_df,
+):
+    full_product_campaign_report = pd.DataFrame()
+    progress = st.session_state["progress"]
+    _my_bar.progress(progress, text=progress_text)
+
+    for i in product_campaing_report_ids.index:
+        product_campagin_data_df = get_reportByCampaign(
+            product_campaing_report_ids["credentials"][i],
+            product_campaing_report_ids["report_id"][i],
+            product_campaing_report_ids["url"][i],
+        )  # getting the report for the campaign preformence for every marketplace
+
+        product_campagin_data_df["marketplace"] = product_campaing_report_ids[
+            "marketplace"
+        ][
+            i
+        ]  # adding a column with the market place to the campaigns
+
+        if (
+            full_product_campaign_report is None
+        ):  # if there is no df named full_campaign_report
+            full_product_campaign_report = product_campagin_data_df  # create one with the first full bussiness report
+        else:
+            full_product_campaign_report = full_product_campaign_report._append(
+                product_campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+        product_campaing_report_ids["got_report"][i] = product_campaing_report_ids[
+            "marketplace"
+        ][i]
+    product_campaigns_full_report = full_product_campaign_report
+
+    _my_bar.progress(progress, text=progress_text)
+    full_campaign_report = pd.DataFrame()
+    full_brand_report = pd.DataFrame()
+    brand_reports_id["got_report"] = ""
+    display_reports_id[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in display_reports_id.index:
+        campagin_data_df = get_campaigns_report_v2(
+            display_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_campaign_report is None:  # if there is no df named full_campaign_report
+            full_campaign_report = (
+                campagin_data_df  # create one with the first full bussiness report
+            )
+        else:
+            full_campaign_report = full_campaign_report._append(
+                campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
+        progress = progress + progress_unit
+        _my_bar.progress(progress, text=progress_text)
+    display_campaign_full_report = full_campaign_report
+    for i in brand_reports_id.index:
+        brand_campagin_data_df = get_campaigns_report_v2(
+            brand_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_brand_report is None:  # if there is no df named full_campaign_report
+            full_brand_report = brand_campagin_data_df  # create one with the first full bussiness report
+        else:
+            full_brand_report = full_brand_report._append(
+                brand_campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        brand_reports_id["got_report"][i] = brand_reports_id["marketplace"][i]
+        progress = progress + progress_unit
+        _my_bar.progress(progress, text=progress_text)
+    brand_campaign_full_report = full_brand_report
+
+    display_df = display_campaign_full_report.rename(
+        columns={
+            "cost": "spend",
+            "attributedUnitsOrdered14d": "purchases7d",
+            "attributedSales14d": "sales7d",
+        }
+    )  # renaming the columns of the display campaing to match the other reports
+    display_df.to_excel("./Display_campaigns.xlsx")
+    brand_df = brand_campaign_full_report.rename(
+        columns={
+            "cost": "spend",
+            "attributedConversions14d": "purchases7d",
+            "attributedSales14d": "sales7d",
+        }
+    )  # renaming the columns of the display campaing  to match the other reports
+    brand_df.to_excel("./brand_campaigns.xlsx")
+    product_campaigns_full_report.to_excel("./product_campaigns.xlsx")
+    campaign_df = product_campaigns_full_report._append(display_df)._append(
+        brand_df
+    )  # appending all the campaign reports together to a single df
+
+    summarizeProductsAndCampaingsGroup = JoinAsinsForCampaigns(
+        campaign_df, productByCampaign
+    )  # Join the Asins of the products to the campaigns data
+    full_business_report = pd.DataFrame()
+    report_id_df["got_report"] = ""
+    for i in report_id_df.index:
+        business_report = get_bussiness_report(
+            credentials_df[report_id_df["credentials"][i]].to_dict(),
+            report_id_df["report_id"][i],
+            report_id_df["marketplace"][i],
+        )
+
+        if full_business_report is None:  # if there is no df named full_campaign_report
+            full_business_report = (
+                business_report  # create one with the first full bussiness report
+            )
+        else:
+            full_business_report = full_business_report._append(
+                business_report
+            )  # append the bussiness report to the full_bussiness_report df
+        report_id_df["got_report"][i] = report_id_df["marketplace"][i]
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    _my_bar.progress(0.95, progress_text)  # setting the progress bar to 95 precent
+
+    summarizeProductsAndCampaingsGroup["Asin"] = summarizeProductsAndCampaingsGroup[
+        "Asin"
+    ].str.rstrip()  # striping extra white space on the Asin column
+
+    full_business_report["childAsin"] = full_business_report["childAsin"].str.rstrip()
+    full_business_report.to_excel("./Bussiness_report.xlsx")
     summarizeProductsAndCampaingsWithReport = summarizeProductsAndCampaingsGroup.merge(
         full_business_report[
             [
@@ -1198,12 +1712,34 @@ with left_column2:
 
 
 run = st.button(
-    "Run", type="primary"
+    "Request Reports", type="primary"
 )  # creating a primary button to run the report generation function
-if run:  # if the button is pressed
-    final_report, profit_final = generate_ppc_report(
-        credentials, profile_id_df, ProductByCampaign_df, profit_df, startDate, endDate
-    )  # generate the ppc and profit report
+# if run:  # if the button is pressed
+#     final_report, profit_final = generate_ppc_report(
+#         credentials, profile_id_df, ProductByCampaign_df, profit_df, startDate, endDate
+#     )  # generate the ppc and profit report
+if run:
+    (
+        st.session_state["_my_bar"],
+        st.session_state["bar_text"],
+        st.session_state["bar_unit"],
+    ) = request_report_generation(
+        credentials, profile_id_df, ProductByCampaign_df, startDate, endDate
+    )
+generate = st.button("Generate final report")
+if generate:
+    final_report, profit_final = pull_reports_generate_report(
+        st.session_state["sponsered_products_report_ids"],
+        st.session_state["sponsered_brand_report_ids"],
+        st.session_state["sponsered_display_report_ids"],
+        st.session_state["bussiness_report_ids"],
+        st.session_state["_my_bar"],
+        st.session_state["bar_text"],
+        st.session_state["bar_unit"],
+        ProductByCampaign_df,
+        credentials,
+        profit_df,
+    )
 
     xlsx_data = BytesIO()  # create an empty bytes object
     with pd.ExcelWriter(
@@ -1237,7 +1773,16 @@ if run:  # if the button is pressed
 
     zip_buffer.seek(0)  # Reset the file pointer to the beginning
 
-    download = st.download_button(
-        label="📥 Download Reports", data=zip_buffer, file_name="Reports.zip"
-    )  # a download button for the zip file
+    st.session_state["buffer"] = zip_buffer
     st.success("הניטור הושלם בהצלחה")
+try:
+    download = st.download_button(
+        label="📥 Download Reports",
+        data=st.session_state["buffer"],
+        file_name="Reports.zip",
+        key="download_button",
+    )
+except KeyError:
+    st.write(
+        "a Downlaod button will appear once the report is ready"
+    )  # a download button for the zip file
