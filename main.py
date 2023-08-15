@@ -16,647 +16,6 @@ from io import BytesIO
 import zipfile
 
 
-def new_access_token(credentials):
-    data = credentials
-    data.update({"grant_type": "refresh_token"})
-    print(data)
-    response = requests.post("https://api.amazon.com/auth/o2/token", data=data)
-    json = response.json()
-    print(json)
-    return json["access_token"]
-
-
-def create_date_list(startDate: str, endDate: str):
-    startDateV2 = int(startDate.replace("-", ""))
-    endDateV2 = int(endDate.replace("-", ""))
-    date_list = list(range(startDateV2, endDateV2 + 1))
-    return date_list
-
-
-def generate_bussiness_report(credentials, start_date, end_date, marketplace):
-    #  gets a range of date and credentials and output a business report
-    report_type = "GET_SALES_AND_TRAFFIC_REPORT"
-    # stating the type of report
-    createReportResponse = Reports(
-        credentials=credentials, marketplace=Marketplaces[marketplace]
-    ).create_report(  # creating a report
-        reportType=report_type,
-        dataStartTime=start_date,
-        dataEndTime=end_date,
-        reportOptions={"asinGranularity": "SKU"},
-    )
-
-    report = createReportResponse.payload  # taking the report response payload
-    print(report)
-    report_id = report["reportId"]  # extracting the newly created report id
-
-    return report_id
-
-
-def get_bussiness_report(credentials, report_id, marketplace):
-    report_type = "GET_SALES_AND_TRAFFIC_REPORT"
-    processing_status = [
-        "IN_QUEUE",
-        "IN_PROGRESS",
-    ]
-    data = Reports(
-        credentials=credentials, marketplace=Marketplaces[marketplace]
-    ).get_report(  # trying to get the report by id
-        reportId=report_id,
-        reportTypes=report_type,
-        processingStatuses=processing_status,
-    )
-    while data.payload.get(
-        "processingStatus"
-    ) not in [  # a while loop to check the proccesing status
-        ProcessingStatus.DONE,
-        ProcessingStatus.FATAL,
-        ProcessingStatus.CANCELLED,
-    ]:
-        print(data.payload)
-        print("Sleeping...")
-        time.sleep(2)  # sleeping for 2 seconds and then trying again
-        data = Reports(
-            credentials=credentials, marketplace=Marketplaces[marketplace]
-        ).get_report(report_id)
-
-    if data.payload.get(
-        "processingStatus"
-    ) in [  # if the process as failed print report failed
-        ProcessingStatus.FATAL,
-        ProcessingStatus.CANCELLED,
-    ]:
-        full_df = pd.DataFrame({"sku": data.payload, "marketplace": marketplace})
-
-    else:
-        print("Success:")  # if the report is ready, get the report document
-        print(data.payload)
-        report_data = Reports(
-            credentials=credentials, marketplace=Marketplaces[marketplace]
-        ).get_report_document(
-            reportDocumentId=data.payload["reportDocumentId"],
-            decrypt=True,
-            download=True,
-        )
-
-    document_data = (
-        report_data.payload
-    )  # getting the data from the document to json and then to dataframe
-    # print(document_data)
-    document_dict = document_data["document"]
-    res = json.loads(document_dict)
-
-    df = pd.DataFrame(res["salesAndTrafficByAsin"])
-    df["marketplace"] = marketplace
-    if "salesByAsin" in df.columns:
-        dict_series = df[
-            "salesByAsin"
-        ]  # creating a sub dataframe with the details of sales by asin
-        dict_list = []
-        for i in dict_series:
-            dict_list.append(i)
-
-        sales_df = pd.DataFrame.from_dict(dict_list)
-
-        dict_series_nested = sales_df[
-            "orderedProductSales"
-        ]  # creating a sub sub dataframe with the details of the ordered product sales
-        dict_list = []
-        for i in dict_series_nested:
-            dict_list.append(i)
-
-        nested_df = pd.DataFrame.from_dict(dict_list)
-
-        traffic_dict_series = df[
-            "trafficByAsin"
-        ]  # creating a sub dataframe with the details of traffic by asin
-        traffic_dict_list = []
-        for i in traffic_dict_series:
-            traffic_dict_list.append(i)
-
-        traffic_df = pd.DataFrame.from_dict(traffic_dict_list)
-        full_df = (
-            df.join(sales_df).join(traffic_df).join(nested_df)
-        )  # joining all the diffrent dataframes by index
-        return full_df
-    else:
-        return df
-
-
-def create_get_business_report(
-    profile_id_df: pd.DataFrame,
-    startDate: str,
-    endDate: str,
-    credentials_df: pd.DataFrame,
-    _my_bar,
-    progress_text,
-    progress,
-    progress_unit,
-):
-    report_id_df = pd.DataFrame(columns=["marketplace", "report_id", "credentials"])
-    full_business_report = pd.DataFrame()
-    for i in profile_id_df.index:
-        report_id = generate_bussiness_report(
-            credentials_df[profile_id_df["credentials"][i]].to_dict(),
-            startDate,
-            endDate,
-            profile_id_df["marketplace"][i],
-        )
-
-        report_id_df = report_id_df._append(
-            {
-                "marketplace": profile_id_df["marketplace"][i],
-                "report_id": report_id,
-                "credentials": profile_id_df["credentials"][i],
-            },
-            ignore_index=True,
-        )
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-    report_id_df["got_report"] = ""
-    for i in report_id_df.index:
-        business_report = get_bussiness_report(
-            credentials_df[report_id_df["credentials"][i]].to_dict(),
-            report_id_df["report_id"][i],
-            report_id_df["marketplace"][i],
-        )
-        if full_business_report is None:  # if there is no df named full_campaign_report
-            full_business_report = (
-                business_report  # create one with the first full bussiness report
-            )
-        else:
-            full_business_report = full_business_report._append(
-                business_report
-            )  # append the bussiness report to the full_bussiness_report df
-        report_id_df["got_report"][i] = report_id_df["marketplace"][i]
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-    return full_business_report, progress
-
-
-def create_reportsByCampaign(headers, url, startDate, endDate):
-    data = (
-        '''{
-        "name":"SP campaigns report",
-        "startDate":"'''
-        + startDate
-        + """",
-        "endDate":"""
-        + '"'
-        + endDate
-        + '"'
-        + """,
-        "configuration":{
-            "adProduct":"SPONSORED_PRODUCTS",
-            "groupBy":["campaign"],
-            "columns":["spend","clicks","campaignName","purchases7d","sales7d"],
-            "reportTypeId":"spCampaigns",
-            "timeUnit":"SUMMARY",
-            "format":"GZIP_JSON"
-            }
-            }"""
-    )
-
-    print(data)
-    response = requests.post(
-        url,
-        headers=headers,
-        data=data,
-    )
-
-    print(response.json())
-    report_id = response.json()["reportId"]
-    return report_id
-
-
-def get_reportByCampaign(headers, report_id, url):
-    response = requests.get(
-        url + "/" + report_id,
-        headers=headers,
-    )
-    print(response.json())
-    while (response.json()["status"] == "PENDING") | (
-        response.json()["status"] == "PROCESSING"
-    ):
-        print("sleeping...")
-        time.sleep(10)
-        response = requests.get(
-            url + "/" + report_id,
-            headers=headers,
-        )
-
-    url = response.json()["url"]
-    if url == None:
-        print(response.json())
-        output = pd.DataFrame(response.json())
-
-    print(url)
-    response = requests.get(
-        url,
-    )
-
-    compressed_file = io.BytesIO(response.content)  # extract .gz file
-    decompressed_file = gzip.GzipFile(fileobj=compressed_file)  # unzip .gz file
-    output = pd.read_json(decompressed_file)
-    print(output)
-
-    return output
-
-
-def create_get_product_campaigns(
-    profileId_df: pd.DataFrame,
-    ADS_CLIENT_ID: str,
-    access_token: str,
-    startDate: str,
-    endDate: str,
-    _my_bar,
-    progress_text,
-    progress,
-    progress_unit,
-):
-    campaing_report_ids = pd.DataFrame(
-        columns=["report_id", "profile_id", "marketplace", "credentials", "url"]
-    )
-    for i in profileId_df.index:
-        ads_headers = {
-            "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
-            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
-            "Authorization": "Bearer " + access_token,
-            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
-        }  # header for the report generation
-
-        report_id = create_reportsByCampaign(
-            ads_headers,
-            profileId_df["url"][i],
-            startDate,
-            endDate,
-        )  # creating a report and getting the report_id
-
-        campaing_report_ids = campaing_report_ids._append(
-            {
-                "report_id": report_id,
-                "profile_id": profileId_df["profile_id"][i],
-                "marketplace": profileId_df["marketplace"][i],
-                "credentials": ads_headers,
-                "url": profileId_df["url"][i],
-            },
-            ignore_index=True,
-        )
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-    full_campaign_report = pd.DataFrame()
-
-    campaing_report_ids[
-        "got_report"
-    ] = ""  # creating an empty column to test the reports gotten
-
-    for i in campaing_report_ids.index:
-        campagin_data_df = get_reportByCampaign(
-            campaing_report_ids["credentials"][i],
-            campaing_report_ids["report_id"][i],
-            campaing_report_ids["url"][i],
-        )  # getting the report for the campaign preformence for every marketplace
-
-        campagin_data_df["marketplace"] = campaing_report_ids["marketplace"][
-            i
-        ]  # adding a column with the market place to the campaigns
-
-        if full_campaign_report is None:  # if there is no df named full_campaign_report
-            full_campaign_report = (
-                campagin_data_df  # create one with the first full bussiness report
-            )
-        else:
-            full_campaign_report = full_campaign_report._append(
-                campagin_data_df
-            )  # append the bussiness report to the full_bussiness_report df
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-        campaing_report_ids["got_report"][i] = campaing_report_ids["marketplace"][i]
-    return full_campaign_report, progress
-
-
-def create_display_campaigns_report(
-    profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
-):
-    json_data = {
-        "reportDate": date,
-        "metrics": "campaignName,cost,attributedSales14d,attributedUnitsOrdered14d",
-        "tactic": "T00020",
-    }
-
-    response = requests.post(
-        profileId_df["url_v2_post"][i],
-        headers=ads_headers_v2,
-        json=json_data,
-    )
-    print(response)
-    try:
-        if response.status_code == 429:
-            time.sleep(6)
-            response = requests.post(
-                profileId_df["url_v2_post"][i],
-                headers=ads_headers_v2,
-                json=json_data,
-            )
-            report_id = response.json()["reportId"]
-
-            display_report_data = {
-                "report_id": report_id,
-                "date": date,
-                "marketplace": profileId_df["marketplace"][i],
-                "credentials": ads_headers_v2,
-                "url": profileId_df["url_v2_get"][i],
-            }
-        else:
-            report_id = response.json()["reportId"]
-
-            display_report_data = {
-                "report_id": report_id,
-                "date": date,
-                "marketplace": profileId_df["marketplace"][i],
-                "credentials": ads_headers_v2,
-                "url": profileId_df["url_v2_get"][i],
-            }
-
-    except Exception as Argument:
-        display_report_data = {
-            "report_id": str(Argument),
-            "date": date,
-            "marketplace": profileId_df["marketplace"][i],
-            "credentials": ads_headers_v2,
-            "url": profileId_df["url_v2_get"][i],
-        }
-
-    return display_report_data
-
-
-def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
-    data = campaing_report_ids["credentials"][i]
-    response = requests.get(
-        campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
-        headers=data,
-    )
-    if "status" in response.json():
-        while response.json()["status"] == "IN_PROGRESS":
-            print("sleeping...")
-            time.sleep(5)
-            response = requests.get(
-                campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
-                headers=data,
-            )
-            print(response.json())
-
-        url = response.json()["location"]
-        if url == None:
-            print(response.json())
-
-        response = requests.get(url, headers=data)
-        print(response.content)
-        compressed_file = io.BytesIO(response.content)  # extract .gz file
-        decompressed_file = gzip.GzipFile(fileobj=compressed_file)  # unzip .gz file
-        output = pd.read_json(decompressed_file)
-        output["marketplace"] = campaing_report_ids["marketplace"][i]
-
-        return output
-    else:
-        print(response.json())
-        data_dict = response.json()  # suppose this is your dictionary
-        output = pd.DataFrame([data_dict])
-        return output
-
-
-def create_brand_campaigns_report(
-    profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
-):
-    json_data = {
-        "reportDate": date,
-        "metrics": "campaignName,cost,attributedUnitsOrdered14d,attributedSales14d,attributedConversions14d",
-        "creativeType": "all",
-        "segment": "placement",
-    }
-
-    response = requests.post(
-        profileId_df["url_v2_post"][i].replace("/sd/", "/v2/hsa/"),
-        headers=ads_headers_v2,
-        json=json_data,
-    )
-    print(response)
-    try:
-        if response.status_code == 429:
-            time.sleep(6)
-            response = requests.post(
-                profileId_df["url_v2_post"][i],
-                headers=ads_headers_v2,
-                json=json_data,
-            )
-            report_id = response.json()["reportId"]
-
-            display_report_data = {
-                "report_id": report_id,
-                "date": date,
-                "marketplace": profileId_df["marketplace"][i],
-                "credentials": ads_headers_v2,
-                "url": profileId_df["url_v2_get"][i],
-            }
-        else:
-            report_id = response.json()["reportId"]
-
-            display_report_data = {
-                "report_id": report_id,
-                "date": date,
-                "marketplace": profileId_df["marketplace"][i],
-                "credentials": ads_headers_v2,
-                "url": profileId_df["url_v2_get"][i],
-            }
-
-    except Exception as Argument:
-        display_report_data = {
-            "report_id": str(Argument),
-            "date": date,
-            "marketplace": profileId_df["marketplace"][i],
-            "credentials": ads_headers_v2,
-            "url": profileId_df["url_v2_get"][i],
-        }
-
-    return display_report_data
-
-
-def create_get_display_campaign_reports(
-    profileId_df: pd.DataFrame,
-    ADS_CLIENT_ID: str,
-    access_token: str,
-    date_list: list,
-    _my_bar,
-    progress_text,
-    progress,
-    progress_unit,
-):
-    display_reports_id = pd.DataFrame(
-        columns=["date", "marketplace", "report_id", "credentials", "url"]
-    )
-
-    for i in profileId_df.index:
-        ads_headers_v2 = {
-            "Content-Type": "application/json",
-            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
-            "Authorization": "Bearer " + access_token,
-            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
-        }
-
-        for date in date_list:
-            display_campaign_report_id = create_display_campaigns_report(
-                profileId_df, ads_headers_v2, date, i
-            )
-            display_reports_id = display_reports_id._append(
-                display_campaign_report_id, ignore_index=True
-            )
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-
-    full_campaign_report = pd.DataFrame()
-    display_reports_id[
-        "got_report"
-    ] = ""  # creating an empty column to test the reports gotten
-
-    for i in display_reports_id.index:
-        campagin_data_df = get_campaigns_report_v2(
-            display_reports_id, i
-        )  # getting the report for the campaign preformence for every marketplace
-
-        if full_campaign_report is None:  # if there is no df named full_campaign_report
-            full_campaign_report = (
-                campagin_data_df  # create one with the first full bussiness report
-            )
-        else:
-            full_campaign_report = full_campaign_report._append(
-                campagin_data_df
-            )  # append the bussiness report to the full_bussiness_report df
-        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-    return full_campaign_report, progress
-
-
-def create_get_brand_campaign_reports(
-    profileId_df: pd.DataFrame,
-    ADS_CLIENT_ID: str,
-    access_token: str,
-    date_list: list,
-    _my_bar,
-    progress_text,
-    progress,
-    progress_unit,
-):
-    display_reports_id = pd.DataFrame(
-        columns=["date", "marketplace", "report_id", "credentials", "url"]
-    )
-
-    for i in profileId_df.index:
-        ads_headers_v2 = {
-            "Content-Type": "application/json",
-            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
-            "Authorization": "Bearer " + access_token,
-            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
-        }
-
-        for date in date_list:
-            display_campaign_report_id = create_brand_campaigns_report(
-                profileId_df, ads_headers_v2, date, i
-            )
-            display_reports_id = display_reports_id._append(
-                display_campaign_report_id, ignore_index=True
-            )
-    progress = progress + progress_unit
-
-    _my_bar.progress(progress, text=progress_text)
-    full_campaign_report = pd.DataFrame()
-    display_reports_id[
-        "got_report"
-    ] = ""  # creating an empty column to test the reports gotten
-
-    for i in display_reports_id.index:
-        campagin_data_df = get_campaigns_report_v2(
-            display_reports_id, i
-        )  # getting the report for the campaign preformence for every marketplace
-
-        if full_campaign_report is None:  # if there is no df named full_campaign_report
-            full_campaign_report = (
-                campagin_data_df  # create one with the first full bussiness report
-            )
-
-        else:
-            full_campaign_report = full_campaign_report._append(
-                campagin_data_df
-            )  # append the bussiness report to the full_bussiness_report df
-        progress = progress + progress_unit
-
-        _my_bar.progress(progress, text=progress_text)
-
-        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
-    return full_campaign_report, progress
-
-
-def JoinAsinsForCampaigns(campaign_df: pd.DataFrame, productByCampaign: pd.DataFrame):
-    grouped_campaign_df = campaign_df.groupby(["campaignName", "marketplace"]).agg(
-        {"spend": "sum", "purchases7d": "sum", "sales7d": "sum"}
-    )  # grouping by the campaign df using the campaign name and marketplace and aggregating the spend, purchases and sales
-
-    grouped_campaign_df = grouped_campaign_df.reset_index()
-    grouped_campaign_df["campaignName"] = grouped_campaign_df[
-        "campaignName"
-    ].str.rstrip()
-    grouped_campaign_df_merged = grouped_campaign_df.merge(
-        productByCampaign[
-            ["campaignName", "Asin", "ValueCount", "marketplace", "Category"]
-        ],
-        on=["campaignName", "marketplace"],
-        how="left",
-    )  # merging the campaign df with the product to campaign map, adding the values count
-
-    grouped_campaign_df_merged["real_spend"] = (
-        grouped_campaign_df_merged["spend"] / grouped_campaign_df_merged["ValueCount"]
-    )
-    grouped_campaign_df_merged["real_sales"] = (
-        grouped_campaign_df_merged["sales7d"] / grouped_campaign_df_merged["ValueCount"]
-    )
-    grouped_campaign_df_merged["real_ordered"] = (
-        grouped_campaign_df_merged["purchases7d"]
-        / grouped_campaign_df_merged["ValueCount"]
-    )
-    summarizeProductsAndCampaings = grouped_campaign_df_merged[
-        [
-            "campaignName",
-            "Category",
-            "marketplace",
-            "Asin",
-            "real_spend",
-            "real_sales",
-            "real_ordered",
-        ]
-    ]
-    summarizeProductsAndCampaingsGroup = summarizeProductsAndCampaings.groupby(
-        ["Asin", "marketplace"]
-    ).agg({"real_spend": "sum", "real_sales": "sum", "real_ordered": "sum"})
-    summarizeProductsAndCampaingsGroup = (
-        summarizeProductsAndCampaingsGroup.reset_index()
-    )
-    summarizeProductsAndCampaingsGroup = summarizeProductsAndCampaingsGroup.merge(
-        summarizeProductsAndCampaings[["Category", "marketplace", "Asin"]],
-        on=["marketplace", "Asin"],
-        how="left",
-    )
-    summarizeProductsAndCampaingsGroup = (
-        summarizeProductsAndCampaingsGroup.drop_duplicates()
-    )
-    return summarizeProductsAndCampaingsGroup
-
-
 def generate_ppc_report(
     credentials_df: pd.DataFrame,
     profileId_df: pd.DataFrame,
@@ -937,7 +296,6 @@ def generate_ppc_report(
             [
                 "unitsOrdered",
                 "childAsin",
-                "sku",
                 "unitSessionPercentage",
                 "amount",
                 "marketplace",
@@ -993,7 +351,6 @@ def generate_ppc_report(
             "marketplace",
             "Category",
             "Asin",
-            "sku",
             "date",
             "period",
             "real_spend",
@@ -1015,7 +372,6 @@ def generate_ppc_report(
     summarizeProductsAndCampaingsWithReport = (
         summarizeProductsAndCampaingsWithReport.rename(
             columns={
-                "sku": "Product Name",
                 "Acos": "Avg Acos %",
                 "date": "Check Date",
                 "period": "Period",
@@ -1086,7 +442,6 @@ def generate_ppc_report(
             "marketplace",
             "Category",
             "Asin",
-            "Product Name",
             "Check Date",
             "Start Date",
             "End Date",
@@ -1144,6 +499,649 @@ def generate_ppc_report(
     return summarizeProductsAndCampaingsWithReport, profit_df
 
 
+def create_get_display_campaign_reports(
+    profileId_df: pd.DataFrame,
+    ADS_CLIENT_ID: str,
+    access_token: str,
+    date_list: list,
+    _my_bar,
+    progress_text,
+    progress,
+    progress_unit,
+):
+    display_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
+
+    for i in profileId_df.index:
+        ads_headers_v2 = {
+            "Content-Type": "application/json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }
+
+        for date in date_list:
+            display_campaign_report_id = create_display_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            display_reports_id = display_reports_id._append(
+                display_campaign_report_id, ignore_index=True
+            )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+    full_campaign_report = pd.DataFrame()
+    display_reports_id[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in display_reports_id.index:
+        campagin_data_df = get_campaigns_report_v2(
+            display_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_campaign_report is None:  # if there is no df named full_campaign_report
+            full_campaign_report = (
+                campagin_data_df  # create one with the first full bussiness report
+            )
+        else:
+            full_campaign_report = full_campaign_report._append(
+                campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+    return full_campaign_report, progress
+
+
+def create_get_brand_campaign_reports(
+    profileId_df: pd.DataFrame,
+    ADS_CLIENT_ID: str,
+    access_token: str,
+    date_list: list,
+    _my_bar,
+    progress_text,
+    progress,
+    progress_unit,
+):
+    display_reports_id = pd.DataFrame(
+        columns=["date", "marketplace", "report_id", "credentials", "url"]
+    )
+
+    for i in profileId_df.index:
+        ads_headers_v2 = {
+            "Content-Type": "application/json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }
+
+        for date in date_list:
+            display_campaign_report_id = create_brand_campaigns_report(
+                profileId_df, ads_headers_v2, date, i
+            )
+            display_reports_id = display_reports_id._append(
+                display_campaign_report_id, ignore_index=True
+            )
+    progress = progress + progress_unit
+
+    _my_bar.progress(progress, text=progress_text)
+    full_campaign_report = pd.DataFrame()
+    display_reports_id[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in display_reports_id.index:
+        campagin_data_df = get_campaigns_report_v2(
+            display_reports_id, i
+        )  # getting the report for the campaign preformence for every marketplace
+
+        if full_campaign_report is None:  # if there is no df named full_campaign_report
+            full_campaign_report = (
+                campagin_data_df  # create one with the first full bussiness report
+            )
+
+        else:
+            full_campaign_report = full_campaign_report._append(
+                campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+
+        display_reports_id["got_report"][i] = display_reports_id["marketplace"][i]
+    return full_campaign_report, progress
+
+
+def create_get_business_report(
+    profile_id_df: pd.DataFrame,
+    startDate: str,
+    endDate: str,
+    credentials_df: pd.DataFrame,
+    _my_bar,
+    progress_text,
+    progress,
+    progress_unit,
+):
+    report_id_df = pd.DataFrame(columns=["marketplace", "report_id", "credentials"])
+    full_business_report = pd.DataFrame()
+    for i in profile_id_df.index:
+        report_id = generate_bussiness_report(
+            credentials_df[profile_id_df["credentials"][i]].to_dict(),
+            startDate,
+            endDate,
+            profile_id_df["marketplace"][i],
+        )
+
+        report_id_df = report_id_df._append(
+            {
+                "marketplace": profile_id_df["marketplace"][i],
+                "report_id": report_id,
+                "credentials": profile_id_df["credentials"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+    report_id_df["got_report"] = ""
+    for i in report_id_df.index:
+        business_report = get_bussiness_report(
+            credentials_df[report_id_df["credentials"][i]].to_dict(),
+            report_id_df["report_id"][i],
+            report_id_df["marketplace"][i],
+        )
+        if full_business_report is None:  # if there is no df named full_campaign_report
+            full_business_report = (
+                business_report  # create one with the first full bussiness report
+            )
+        else:
+            full_business_report = full_business_report._append(
+                business_report
+            )  # append the bussiness report to the full_bussiness_report df
+        report_id_df["got_report"][i] = report_id_df["marketplace"][i]
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+    return full_business_report, progress
+
+
+def create_get_product_campaigns(
+    profileId_df: pd.DataFrame,
+    ADS_CLIENT_ID: str,
+    access_token: str,
+    startDate: str,
+    endDate: str,
+    _my_bar,
+    progress_text,
+    progress,
+    progress_unit,
+):
+    campaing_report_ids = pd.DataFrame(
+        columns=["report_id", "profile_id", "marketplace", "credentials", "url"]
+    )
+    for i in profileId_df.index:
+        ads_headers = {
+            "Content-Type": "application/vnd.createasyncreportrequest.v3+json",
+            "Amazon-Advertising-API-ClientId": ADS_CLIENT_ID,
+            "Authorization": "Bearer " + access_token,
+            "Amazon-Advertising-API-Scope": profileId_df["profile_id"][i],
+        }  # header for the report generation
+
+        report_id = create_reportsByCampaign(
+            ads_headers,
+            profileId_df["url"][i],
+            startDate,
+            endDate,
+        )  # creating a report and getting the report_id
+
+        campaing_report_ids = campaing_report_ids._append(
+            {
+                "report_id": report_id,
+                "profile_id": profileId_df["profile_id"][i],
+                "marketplace": profileId_df["marketplace"][i],
+                "credentials": ads_headers,
+                "url": profileId_df["url"][i],
+            },
+            ignore_index=True,
+        )
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+    full_campaign_report = pd.DataFrame()
+
+    campaing_report_ids[
+        "got_report"
+    ] = ""  # creating an empty column to test the reports gotten
+
+    for i in campaing_report_ids.index:
+        campagin_data_df = get_reportByCampaign(
+            campaing_report_ids["credentials"][i],
+            campaing_report_ids["report_id"][i],
+            campaing_report_ids["url"][i],
+        )  # getting the report for the campaign preformence for every marketplace
+
+        campagin_data_df["marketplace"] = campaing_report_ids["marketplace"][
+            i
+        ]  # adding a column with the market place to the campaigns
+
+        if full_campaign_report is None:  # if there is no df named full_campaign_report
+            full_campaign_report = (
+                campagin_data_df  # create one with the first full bussiness report
+            )
+        else:
+            full_campaign_report = full_campaign_report._append(
+                campagin_data_df
+            )  # append the bussiness report to the full_bussiness_report df
+        progress = progress + progress_unit
+
+        _my_bar.progress(progress, text=progress_text)
+        campaing_report_ids["got_report"][i] = campaing_report_ids["marketplace"][i]
+    return full_campaign_report, progress
+
+
+def new_access_token(credentials):
+    data = credentials
+    data.update({"grant_type": "refresh_token"})
+    print(data)
+    response = requests.post("https://api.amazon.com/auth/o2/token", data=data)
+    json = response.json()
+    print(json)
+    return json["access_token"]
+
+
+def create_date_list(startDate: str, endDate: str) -> list:
+    date_range = pd.date_range(startDate, endDate)
+    date_list = [int(date.strftime("%Y%m%d")) for date in date_range]
+    return date_list
+
+
+def generate_bussiness_report(credentials, start_date, end_date, marketplace):
+    #  gets a range of date and credentials and output a business report
+    report_type = "GET_SALES_AND_TRAFFIC_REPORT"
+    # stating the type of report
+    createReportResponse = Reports(
+        credentials=credentials, marketplace=Marketplaces[marketplace]
+    ).create_report(  # creating a report
+        reportType=report_type,
+        dataStartTime=start_date,
+        dataEndTime=end_date,
+        reportOptions={"asinGranularity": "CHILD"},
+    )
+
+    report = createReportResponse.payload  # taking the report response payload
+    print(report)
+    report_id = report["reportId"]  # extracting the newly created report id
+
+    return report_id
+
+
+def get_bussiness_report(credentials, report_id, marketplace):
+    report_type = "GET_SALES_AND_TRAFFIC_REPORT"
+    processing_status = [
+        "IN_QUEUE",
+        "IN_PROGRESS",
+    ]
+    data = Reports(
+        credentials=credentials, marketplace=Marketplaces[marketplace]
+    ).get_report(  # trying to get the report by id
+        reportId=report_id,
+        reportTypes=report_type,
+        processingStatuses=processing_status,
+    )
+    while data.payload.get(
+        "processingStatus"
+    ) not in [  # a while loop to check the proccesing status
+        ProcessingStatus.DONE,
+        ProcessingStatus.FATAL,
+        ProcessingStatus.CANCELLED,
+    ]:
+        print(data.payload)
+        print("Sleeping...")
+        time.sleep(2)  # sleeping for 2 seconds and then trying again
+        data = Reports(
+            credentials=credentials, marketplace=Marketplaces[marketplace]
+        ).get_report(report_id)
+
+    if data.payload.get(
+        "processingStatus"
+    ) in [  # if the process as failed print report failed
+        ProcessingStatus.FATAL,
+        ProcessingStatus.CANCELLED,
+    ]:
+        full_df = pd.DataFrame({"sku": data.payload, "marketplace": marketplace})
+
+    else:
+        print("Success:")  # if the report is ready, get the report document
+        print(data.payload)
+        report_data = Reports(
+            credentials=credentials, marketplace=Marketplaces[marketplace]
+        ).get_report_document(
+            reportDocumentId=data.payload["reportDocumentId"],
+            decrypt=True,
+            download=True,
+        )
+
+    document_data = (
+        report_data.payload
+    )  # getting the data from the document to json and then to dataframe
+    # print(document_data)
+    document_dict = document_data["document"]
+    res = json.loads(document_dict)
+
+    df = pd.DataFrame(res["salesAndTrafficByAsin"])
+    df["marketplace"] = marketplace
+    if "salesByAsin" in df.columns:
+        dict_series = df[
+            "salesByAsin"
+        ]  # creating a sub dataframe with the details of sales by asin
+        dict_list = []
+        for i in dict_series:
+            dict_list.append(i)
+
+        sales_df = pd.DataFrame.from_dict(dict_list)
+
+        dict_series_nested = sales_df[
+            "orderedProductSales"
+        ]  # creating a sub sub dataframe with the details of the ordered product sales
+        dict_list = []
+        for i in dict_series_nested:
+            dict_list.append(i)
+
+        nested_df = pd.DataFrame.from_dict(dict_list)
+
+        traffic_dict_series = df[
+            "trafficByAsin"
+        ]  # creating a sub dataframe with the details of traffic by asin
+        traffic_dict_list = []
+        for i in traffic_dict_series:
+            traffic_dict_list.append(i)
+
+        traffic_df = pd.DataFrame.from_dict(traffic_dict_list)
+        full_df = (
+            df.join(sales_df).join(traffic_df).join(nested_df)
+        )  # joining all the diffrent dataframes by index
+
+        return full_df
+    else:
+        return df
+
+
+def create_reportsByCampaign(headers, url, startDate, endDate):
+    data = (
+        '''{
+        "name":"SP campaigns report",
+        "startDate":"'''
+        + startDate
+        + """",
+        "endDate":"""
+        + '"'
+        + endDate
+        + '"'
+        + """,
+        "configuration":{
+            "adProduct":"SPONSORED_PRODUCTS",
+            "groupBy":["campaign"],
+            "columns":["spend","clicks","campaignName","purchases7d","sales7d"],
+            "reportTypeId":"spCampaigns",
+            "timeUnit":"SUMMARY",
+            "format":"GZIP_JSON"
+            }
+            }"""
+    )
+
+    print(data)
+    response = requests.post(
+        url,
+        headers=headers,
+        data=data,
+    )
+
+    print(response.json())
+    report_id = response.json()["reportId"]
+    return report_id
+
+
+def get_reportByCampaign(headers, report_id, url):
+    response = requests.get(
+        url + "/" + report_id,
+        headers=headers,
+    )
+    print(response.json())
+    while (response.json()["status"] == "PENDING") | (
+        response.json()["status"] == "PROCESSING"
+    ):
+        print("sleeping...")
+        time.sleep(10)
+        response = requests.get(
+            url + "/" + report_id,
+            headers=headers,
+        )
+
+    url = response.json()["url"]
+    if url == None:
+        print(response.json())
+        output = pd.DataFrame(response.json())
+
+    print(url)
+    response = requests.get(
+        url,
+    )
+
+    compressed_file = io.BytesIO(response.content)  # extract .gz file
+    decompressed_file = gzip.GzipFile(fileobj=compressed_file)  # unzip .gz file
+    output = pd.read_json(decompressed_file)
+    print(output)
+
+    return output
+
+
+def create_display_campaigns_report(
+    profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
+):
+    json_data = {
+        "reportDate": date,
+        "metrics": "campaignName,cost,attributedSales14d,attributedUnitsOrdered14d",
+        "tactic": "T00020",
+    }
+
+    response = requests.post(
+        profileId_df["url_v2_post"][i],
+        headers=ads_headers_v2,
+        json=json_data,
+    )
+    print(response)
+    try:
+        while response.status_code != 202:
+            time.sleep(2)
+            response = requests.post(
+                profileId_df["url_v2_post"][i],
+                headers=ads_headers_v2,
+                json=json_data,
+            )
+            report_id = response.json()["reportId"]
+
+            display_report_data = {
+                "report_id": report_id,
+                "date": date,
+                "marketplace": profileId_df["marketplace"][i],
+                "credentials": ads_headers_v2,
+                "url": profileId_df["url_v2_get"][i],
+            }
+
+        report_id = response.json()["reportId"]
+
+        display_report_data = {
+            "report_id": report_id,
+            "date": date,
+            "marketplace": profileId_df["marketplace"][i],
+            "credentials": ads_headers_v2,
+            "url": profileId_df["url_v2_get"][i],
+        }
+
+    except Exception as Argument:
+        display_report_data = {
+            "report_id": str(Argument),
+            "date": date,
+            "marketplace": profileId_df["marketplace"][i],
+            "credentials": ads_headers_v2,
+            "url": profileId_df["url_v2_get"][i],
+        }
+
+    return display_report_data
+
+
+def get_campaigns_report_v2(campaing_report_ids: pd.DataFrame, i: int):
+    data = campaing_report_ids["credentials"][i]
+    response = requests.get(
+        campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
+        headers=data,
+    )
+    if "status" in response.json():
+        while response.json()["status"] == "IN_PROGRESS":
+            print("sleeping...")
+            time.sleep(5)
+            response = requests.get(
+                campaing_report_ids["url"][i] + campaing_report_ids["report_id"][i],
+                headers=data,
+            )
+            print(response.json())
+
+        url = response.json()["location"]
+        if url == None:
+            print(response.json())
+
+        response = requests.get(url, headers=data)
+        print(response.content)
+        compressed_file = io.BytesIO(response.content)  # extract .gz file
+        decompressed_file = gzip.GzipFile(fileobj=compressed_file)  # unzip .gz file
+        output = pd.read_json(decompressed_file)
+        output["marketplace"] = campaing_report_ids["marketplace"][i]
+        output["date"] = campaing_report_ids["date"][i]
+        return output
+    else:
+        print(response.json())
+        data_dict = response.json()  # suppose this is your dictionary
+        output = pd.DataFrame([data_dict])
+        output["date"] = campaing_report_ids["date"][i]
+        output["marketplace"] = campaing_report_ids["marketplace"][i]
+        return output
+
+
+def create_brand_campaigns_report(
+    profileId_df: pd.DataFrame, ads_headers_v2: dict, date: str, i: int
+):
+    json_data = {
+        "reportDate": date,
+        "metrics": "campaignName,cost,attributedUnitsOrdered14d,attributedSales14d,attributedConversions14d",
+        "creativeType": "all",
+        "segment": "placement",
+    }
+
+    response = requests.post(
+        profileId_df["url_v2_post"][i].replace("/sd/", "/v2/hsa/"),
+        headers=ads_headers_v2,
+        json=json_data,
+    )
+    print(response)
+    try:
+        while response.status_code != 202:
+            time.sleep(2)
+            response = requests.post(
+                profileId_df["url_v2_post"][i],
+                headers=ads_headers_v2,
+                json=json_data,
+            )
+            report_id = response.json()["reportId"]
+
+            display_report_data = {
+                "report_id": report_id,
+                "date": date,
+                "marketplace": profileId_df["marketplace"][i],
+                "credentials": ads_headers_v2,
+                "url": profileId_df["url_v2_get"][i],
+            }
+
+        report_id = response.json()["reportId"]
+
+        display_report_data = {
+            "report_id": report_id,
+            "date": date,
+            "marketplace": profileId_df["marketplace"][i],
+            "credentials": ads_headers_v2,
+            "url": profileId_df["url_v2_get"][i],
+        }
+
+    except Exception as Argument:
+        display_report_data = {
+            "report_id": str(Argument),
+            "date": date,
+            "marketplace": profileId_df["marketplace"][i],
+            "credentials": ads_headers_v2,
+            "url": profileId_df["url_v2_get"][i],
+        }
+
+    return display_report_data
+
+
+def JoinAsinsForCampaigns(campaign_df: pd.DataFrame, productByCampaign: pd.DataFrame):
+    grouped_campaign_df = campaign_df.groupby(["campaignName", "marketplace"]).agg(
+        {"spend": "sum", "purchases7d": "sum", "sales7d": "sum"}
+    )  # grouping by the campaign df using the campaign name and marketplace and aggregating the spend, purchases and sales
+
+    grouped_campaign_df = grouped_campaign_df.reset_index()
+    grouped_campaign_df["campaignName"] = grouped_campaign_df[
+        "campaignName"
+    ].str.rstrip()
+    grouped_campaign_df_merged = grouped_campaign_df.merge(
+        productByCampaign[
+            ["campaignName", "Asin", "ValueCount", "marketplace", "Category"]
+        ],
+        on=["campaignName", "marketplace"],
+        how="left",
+    )  # merging the campaign df with the product to campaign map, adding the values count
+
+    grouped_campaign_df_merged["real_spend"] = (
+        grouped_campaign_df_merged["spend"] / grouped_campaign_df_merged["ValueCount"]
+    )
+    grouped_campaign_df_merged["real_sales"] = (
+        grouped_campaign_df_merged["sales7d"] / grouped_campaign_df_merged["ValueCount"]
+    )
+    grouped_campaign_df_merged["real_ordered"] = (
+        grouped_campaign_df_merged["purchases7d"]
+        / grouped_campaign_df_merged["ValueCount"]
+    )
+    summarizeProductsAndCampaings = grouped_campaign_df_merged[
+        [
+            "campaignName",
+            "Category",
+            "marketplace",
+            "Asin",
+            "real_spend",
+            "real_sales",
+            "real_ordered",
+        ]
+    ]
+    summarizeProductsAndCampaingsGroup = summarizeProductsAndCampaings.groupby(
+        ["Asin", "marketplace"]
+    ).agg({"real_spend": "sum", "real_sales": "sum", "real_ordered": "sum"})
+    summarizeProductsAndCampaingsGroup = (
+        summarizeProductsAndCampaingsGroup.reset_index()
+    )
+    summarizeProductsAndCampaingsGroup = summarizeProductsAndCampaingsGroup.merge(
+        summarizeProductsAndCampaings[["Category", "marketplace", "Asin"]],
+        on=["marketplace", "Asin"],
+        how="left",
+    )
+    summarizeProductsAndCampaingsGroup = (
+        summarizeProductsAndCampaingsGroup.drop_duplicates()
+    )
+    return summarizeProductsAndCampaingsGroup
+
+
 def request_report_generation(
     credentials_df: pd.DataFrame,
     profileId_df: pd.DataFrame,
@@ -1151,6 +1149,9 @@ def request_report_generation(
     startDate: str,
     endDate: str,
 ):
+    for key in st.session_state.keys():
+        del st.session_state[key]
+
     progress_text = (
         "Operation in progress. Please wait."  # define the progress bar text
     )
@@ -1263,7 +1264,7 @@ def request_report_generation(
         _my_bar.progress(progress, text=progress_text)
 
     report_id_df = pd.DataFrame(columns=["marketplace", "report_id", "credentials"])
-    full_business_report = pd.DataFrame()
+
     for i in profileId_df.index:
         report_id = generate_bussiness_report(
             credentials_df[profileId_df["credentials"][i]].to_dict(),
@@ -1392,7 +1393,7 @@ def pull_reports_generate_report(
             "attributedSales14d": "sales7d",
         }
     )  # renaming the columns of the display campaing to match the other reports
-    display_df.to_excel("./Display_campaigns.xlsx")
+
     brand_df = brand_campaign_full_report.rename(
         columns={
             "cost": "spend",
@@ -1444,7 +1445,6 @@ def pull_reports_generate_report(
             [
                 "unitsOrdered",
                 "childAsin",
-                "sku",
                 "unitSessionPercentage",
                 "amount",
                 "marketplace",
@@ -1500,7 +1500,6 @@ def pull_reports_generate_report(
             "marketplace",
             "Category",
             "Asin",
-            "sku",
             "date",
             "period",
             "real_spend",
@@ -1522,7 +1521,6 @@ def pull_reports_generate_report(
     summarizeProductsAndCampaingsWithReport = (
         summarizeProductsAndCampaingsWithReport.rename(
             columns={
-                "sku": "Product Name",
                 "Acos": "Avg Acos %",
                 "date": "Check Date",
                 "period": "Period",
@@ -1593,7 +1591,6 @@ def pull_reports_generate_report(
             "marketplace",
             "Category",
             "Asin",
-            "Product Name",
             "Check Date",
             "Start Date",
             "End Date",
@@ -1648,7 +1645,13 @@ def pull_reports_generate_report(
 
     _my_bar.progress(1)
 
-    return summarizeProductsAndCampaingsWithReport, profit_df
+    return (
+        summarizeProductsAndCampaingsWithReport,
+        profit_df,
+        brand_df,
+        display_df,
+        product_campaigns_full_report,
+    )
 
 
 st.set_page_config(
@@ -1728,7 +1731,13 @@ if run:
     )
 generate = st.button("Generate final report")
 if generate:
-    final_report, profit_final = pull_reports_generate_report(
+    (
+        final_report,
+        profit_final,
+        brand_report,
+        display_report,
+        product_report,
+    ) = pull_reports_generate_report(
         st.session_state["sponsered_products_report_ids"],
         st.session_state["sponsered_brand_report_ids"],
         st.session_state["sponsered_display_report_ids"],
@@ -1741,23 +1750,22 @@ if generate:
         profit_df,
     )
 
-    xlsx_data = BytesIO()  # create an empty bytes object
-    with pd.ExcelWriter(
-        xlsx_data, engine="openpyxl"
-    ) as writer:  # define the excel writer as writer
-        final_report.to_excel(
-            writer, sheet_name="PPC Report"
-        )  # write the final report into byte object
-    xlsx_data.seek(0)  # run the byte to the beggining
+    def dataframe_to_excel_byte(df: pd.DataFrame, sheetName: str):
+        xlsx_data = BytesIO()  # create an empty bytes object
+        with pd.ExcelWriter(
+            xlsx_data, engine="openpyxl"
+        ) as writer:  # define the excel writer as writer
+            df.to_excel(
+                writer, sheet_name=sheetName
+            )  # write the final report into byte object
+        xlsx_data.seek(0)
+        return xlsx_data  # run the byte to the beggining
 
-    profit_xlsx_data = BytesIO()  # create an empty bytes object
-    with pd.ExcelWriter(
-        profit_xlsx_data, engine="openpyxl"
-    ) as writer:  # define the excel writer as writer
-        profit_final.to_excel(
-            writer, sheet_name="Profit Report"
-        )  # write the profit final report into byte object
-    profit_xlsx_data.seek(0)  # run the byte to the beggining
+    xlsx_data = dataframe_to_excel_byte(final_report, "PPC Report")
+    profit_xlsx_data = dataframe_to_excel_byte(profit_final, "Profit Report")
+    brand_xlsx_data = dataframe_to_excel_byte(brand_report, "Brand Report")
+    display_xlsx_data = dataframe_to_excel_byte(display_report, "Display Report")
+    product_xlsx_data = dataframe_to_excel_byte(product_report, "Product Report")
 
     zip_buffer = io.BytesIO()  # create empty byte for zip
     with zipfile.ZipFile(
@@ -1770,7 +1778,15 @@ if generate:
         zf.writestr(
             "Profit Report.xlsx", profit_xlsx_data.read()
         )  # read the content of the profit_xlsx_data
-
+        zf.writestr(
+            "Brand Report.xlsx", brand_xlsx_data.read()
+        )  # read the content of the profit_xlsx_data
+        zf.writestr(
+            "Display Report.xlsx", display_xlsx_data.read()
+        )  # read the content of the profit_xlsx_data
+        zf.writestr(
+            "Product Report.xlsx", product_xlsx_data.read()
+        )  # read the content of the profit_xlsx_data
     zip_buffer.seek(0)  # Reset the file pointer to the beginning
 
     st.session_state["buffer"] = zip_buffer
