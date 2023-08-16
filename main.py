@@ -1561,7 +1561,7 @@ def pull_reports_generate_report(
 
     summarizeProductsAndCampaingsWithReport = (
         summarizeProductsAndCampaingsWithReport.merge(
-            profit_df[["profit without PPC", "ASIN", "Country"]],
+            profit_df[["profit without PPC", "ASIN", "Country",'Currency conversion ILS']],
             left_on=["marketplace", "Asin"],
             right_on=["Country", "ASIN"],
             how="left",
@@ -1570,11 +1570,13 @@ def pull_reports_generate_report(
 
     summarizeProductsAndCampaingsWithReport[
         "Profit Per Unit After PPC ILS"
-    ] = summarizeProductsAndCampaingsWithReport[
+    ] = (summarizeProductsAndCampaingsWithReport[
         "profit without PPC"
-    ] - summarizeProductsAndCampaingsWithReport[
+    ] - (summarizeProductsAndCampaingsWithReport[
         "Total PPC Cost Per Unit"
-    ].fillna(
+    ])*(summarizeProductsAndCampaingsWithReport[
+        "Currency conversion ILS"
+    ])).fillna(
         0
     )  # calculating the profit per unit
 
